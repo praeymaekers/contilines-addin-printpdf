@@ -49,11 +49,9 @@
             body { background: white; }
             #pages { padding-top: 0; }
             canvas {
-                margin: 0;
-                box-shadow: none;
+                margin: 0; box-shadow: none;
                 page-break-after: always;
-                width: 100% !important;
-                height: auto !important;
+                width: 100% !important; height: auto !important;
             }
             canvas:last-child { page-break-after: avoid; }
         }
@@ -61,7 +59,7 @@
 </head>
 <body>
     <div id="toolbar">
-        <span>Conti-Lines &mdash; Print als PDF</span>
+        <span>Print als PDF &mdash; Conti-Lines</span>
         <button onclick="window.print()">&#128424; Afdrukken</button>
         <button onclick="Office.context.ui.messageParent('closed')">Sluiten</button>
     </div>
@@ -76,6 +74,10 @@
             'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
         Office.onReady(function () {
+            // Stap 1: meld aan parent dat dialoog klaar is
+            Office.context.ui.messageParent('ready');
+
+            // Stap 2: wacht op PDF data van parent
             Office.context.ui.addHandlerAsync(
                 Office.EventType.DialogParentMessageReceived,
                 function (args) {
@@ -90,20 +92,17 @@
                     document.getElementById('loading').style.display = 'none';
                     var container = document.getElementById('pages');
                     var pagePromises = [];
-
                     for (var i = 1; i <= pdf.numPages; i++) {
                         pagePromises.push(renderPage(pdf, i, container));
                     }
-
                     return Promise.all(pagePromises);
                 })
                 .then(function () {
-                    // Automatisch printdialoog openen
                     setTimeout(function () { window.print(); }, 800);
                 })
                 .catch(function (err) {
                     document.getElementById('loading').innerHTML =
-                        '<p style="color:red">Fout bij laden PDF: ' + err.message + '</p>';
+                        '<p style="color:red;padding:20px;">Fout bij laden PDF:<br>' + err.message + '</p>';
                 });
         }
 

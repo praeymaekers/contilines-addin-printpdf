@@ -1,18 +1,45 @@
 /*
  * Print als PDF - Conti-Lines NV
- * Office JS Add-in: converteert Word naar PDF en opent printdialoog
+ * v1.1 - gebruikt displayDialogAsync om blob URL probleem te vermijden
  */
 
 Office.onReady(() => {});
 
-/**
- * Hoofdfunctie - gekoppeld aan de ribbon knop
- */
 function printAsPdf(event) {
     getDocumentAsPdf()
         .then(function (pdfBlob) {
-            var url = URL.createObjectURL(pdfBlob);
-            printViaIframe(url, event);
+            return blobToBase64(pdfBlob);
+        })
+        .then(function (base64DataUrl) {
+            Office.context.ui.displayDialogAsync(
+                'https://praeymaekers.github.io/contilines-addin-printpdf/printdialog.html',
+                { height: 80, width: 60, displayInIframe: false },
+                function (result) {
+                    if (result.status === Office.AsyncResultStatus.Failed) {
+                        alert('Kon printvenster niet openen: ' + result.error.message);
+                        event.completed();
+                        return;
+                    }
+
+                    var dialog = result.value;
+
+                    // Wacht tot de dialoog geladen is, stuur dan de PDF data
+                    setTimeout(function () {
+                        dialog.messageChild(base64DataUrl);
+                    }, 2000);
+
+                    // Dialoog meldt terug wanneer klaar
+                    dialog.addEventHandler(Office.EventType.DialogMessageReceived, function (args) {
+                        dialog.close();
+                        event.completed();
+                    });
+
+                    // Dialoog gesloten door gebruiker
+                    dialog.addEventHandler(Office.EventType.DialogEventReceived, function () {
+                        event.completed();
+                    });
+                }
+            );
         })
         .catch(function (err) {
             event.completed({ allowEvent: false });
@@ -20,44 +47,15 @@ function printAsPdf(event) {
         });
 }
 
-/**
- * Laadt de PDF in een verborgen iframe en roept window.print() op
- * (vermijdt het blob:// protocol probleem met window.open in WebView2)
- */
-function printViaIframe(pdfUrl, event) {
-    var iframe = document.createElement('iframe');
-    iframe.style.cssText = 'width:1px;height:1px;position:absolute;top:-9999px;left:-9999px;border:none;';
-    iframe.src = pdfUrl;
-    document.body.appendChild(iframe);
-
-    var done = false;
-
-    function tryPrint() {
-        if (done) return;
-        done = true;
-        try {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-        } catch (e) {
-            // WebView2 staat soms geen cross-frame print toe - fallback naar parent
-            try { window.print(); } catch (e2) {}
-        }
-        event.completed();
-        // Opruimen na 5 minuten
-        setTimeout(function () {
-            try { document.body.removeChild(iframe); } catch (e) {}
-            URL.revokeObjectURL(pdfUrl);
-        }, 300000);
-    }
-
-    iframe.onload = function () { setTimeout(tryPrint, 800); };
-    // Fallback als onload niet afvuurt (bijv. bij sommige PDF-viewers in WebView2)
-    setTimeout(tryPrint, 5000);
+function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function (e) { resolve(e.target.result); };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
 }
 
-/**
- * Haalt het volledige document op als PDF (in slices van 64KB)
- */
 function getDocumentAsPdf() {
     return new Promise(function (resolve, reject) {
         Office.context.document.getFileAsync(
@@ -68,12 +66,10 @@ function getDocumentAsPdf() {
                     reject(new Error(result.error.message));
                     return;
                 }
-
                 var file = result.value;
                 var total = file.sliceCount;
                 var slices = new Array(total);
                 var received = 0;
-
                 for (var i = 0; i < total; i++) {
                     (function (index) {
                         file.getSliceAsync(index, function (sliceResult) {
@@ -82,10 +78,8 @@ function getDocumentAsPdf() {
                                 reject(new Error(sliceResult.error.message));
                                 return;
                             }
-
                             slices[sliceResult.value.index] = new Uint8Array(sliceResult.value.data);
                             received++;
-
                             if (received === total) {
                                 file.closeAsync();
                                 var totalBytes = slices.reduce(function (n, s) { return n + s.length; }, 0);
@@ -105,7 +99,6 @@ function getDocumentAsPdf() {
     });
 }
 
-// Functie registreren bij Office
 if (typeof Office !== 'undefined') {
     Office.actions.associate('printAsPdf', printAsPdf);
 }

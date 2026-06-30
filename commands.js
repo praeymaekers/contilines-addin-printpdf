@@ -1,6 +1,6 @@
 /*
  * Print als PDF - Conti-Lines NV
- * v1.1 - gebruikt displayDialogAsync om blob URL probleem te vermijden
+ * v1.2 - dialoog meldt 'ready' voor data verstuurd wordt
  */
 
 Office.onReady(() => {});
@@ -23,18 +23,16 @@ function printAsPdf(event) {
 
                     var dialog = result.value;
 
-                    // Wacht tot de dialoog geladen is, stuur dan de PDF data
-                    setTimeout(function () {
-                        dialog.messageChild(base64DataUrl);
-                    }, 2000);
-
-                    // Dialoog meldt terug wanneer klaar
                     dialog.addEventHandler(Office.EventType.DialogMessageReceived, function (args) {
-                        dialog.close();
-                        event.completed();
+                        if (args.message === 'ready') {
+                            // Dialoog is geïnitialiseerd — nu pas data sturen
+                            dialog.messageChild(base64DataUrl);
+                        } else if (args.message === 'printed' || args.message === 'closed') {
+                            dialog.close();
+                            event.completed();
+                        }
                     });
 
-                    // Dialoog gesloten door gebruiker
                     dialog.addEventHandler(Office.EventType.DialogEventReceived, function () {
                         event.completed();
                     });

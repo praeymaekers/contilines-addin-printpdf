@@ -1,0 +1,1 @@
+Some Word documents have very narrow margins, which can be a blocking factor. A simple print-to-pdf and then printing this pdf resolves this. However to help users avoid these steps, this add in was created.

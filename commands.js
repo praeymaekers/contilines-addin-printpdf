@@ -3,9 +3,7 @@
  * Office JS Add-in: converteert Word naar PDF en opent printdialoog
  */
 
-Office.onReady(() => {
-    // Office JS is geladen
-});
+Office.onReady(() => {});
 
 /**
  * Hoofdfunctie - gekoppeld aan de ribbon knop
@@ -14,17 +12,47 @@ function printAsPdf(event) {
     getDocumentAsPdf()
         .then(function (pdfBlob) {
             var url = URL.createObjectURL(pdfBlob);
-            openPrintWindow(url, event);
+            printViaIframe(url, event);
         })
         .catch(function (err) {
-            // Toon foutmelding via Office notificatie
-            try {
-                Office.context.document.settings.set('lastError', err.message);
-            } catch (e) {}
-            // Laat Word weten dat de functie klaar is (ook bij fout)
             event.completed({ allowEvent: false });
             alert('Fout bij aanmaken PDF: ' + err.message);
         });
+}
+
+/**
+ * Laadt de PDF in een verborgen iframe en roept window.print() op
+ * (vermijdt het blob:// protocol probleem met window.open in WebView2)
+ */
+function printViaIframe(pdfUrl, event) {
+    var iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:1px;height:1px;position:absolute;top:-9999px;left:-9999px;border:none;';
+    iframe.src = pdfUrl;
+    document.body.appendChild(iframe);
+
+    var done = false;
+
+    function tryPrint() {
+        if (done) return;
+        done = true;
+        try {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+        } catch (e) {
+            // WebView2 staat soms geen cross-frame print toe - fallback naar parent
+            try { window.print(); } catch (e2) {}
+        }
+        event.completed();
+        // Opruimen na 5 minuten
+        setTimeout(function () {
+            try { document.body.removeChild(iframe); } catch (e) {}
+            URL.revokeObjectURL(pdfUrl);
+        }, 300000);
+    }
+
+    iframe.onload = function () { setTimeout(tryPrint, 800); };
+    // Fallback als onload niet afvuurt (bijv. bij sommige PDF-viewers in WebView2)
+    setTimeout(tryPrint, 5000);
 }
 
 /**
@@ -47,7 +75,6 @@ function getDocumentAsPdf() {
                 var received = 0;
 
                 for (var i = 0; i < total; i++) {
-                    // Slices worden parallel opgehaald
                     (function (index) {
                         file.getSliceAsync(index, function (sliceResult) {
                             if (sliceResult.status !== Office.AsyncResultStatus.Succeeded) {
@@ -61,8 +88,6 @@ function getDocumentAsPdf() {
 
                             if (received === total) {
                                 file.closeAsync();
-
-                                // Alle slices samenvoegen tot één PDF Blob
                                 var totalBytes = slices.reduce(function (n, s) { return n + s.length; }, 0);
                                 var combined = new Uint8Array(totalBytes);
                                 var offset = 0;
@@ -70,7 +95,6 @@ function getDocumentAsPdf() {
                                     combined.set(slices[j], offset);
                                     offset += slices[j].length;
                                 }
-
                                 resolve(new Blob([combined], { type: 'application/pdf' }));
                             }
                         });
@@ -79,64 +103,6 @@ function getDocumentAsPdf() {
             }
         );
     });
-}
-
-/**
- * Opent de PDF in een nieuw venster en stuurt meteen het print-commando
- */
-function openPrintWindow(pdfUrl, event) {
-    var printWindow = window.open(pdfUrl, '_blank');
-
-    if (!printWindow) {
-        // Popup geblokkeerd: fallback naar downloaden
-        downloadFallback(pdfUrl);
-        event.completed();
-        return;
-    }
-
-    var printed = false;
-
-    function doPrint() {
-        if (printed) return;
-        printed = true;
-        try {
-            printWindow.focus();
-            printWindow.print();
-        } catch (e) {
-            // Sommige PDF-viewers staan geen window.print() toe vanuit extern script
-            // Gebruiker kan zelf Ctrl+P gebruiken - venster is wel geopend
-        }
-        // Geheugenbeheer: URL vrijgeven na 5 minuten
-        setTimeout(function () { URL.revokeObjectURL(pdfUrl); }, 300000);
-        event.completed();
-    }
-
-    // Wacht op load event, met timeout als fallback
-    printWindow.addEventListener('load', function () {
-        setTimeout(doPrint, 800);
-    });
-
-    // Fallback als load event niet afvuurt (bijv. bij Edge PDF viewer)
-    setTimeout(doPrint, 4000);
-}
-
-/**
- * Fallback: download de PDF als het venster geblokkeerd wordt
- */
-function downloadFallback(pdfUrl) {
-    var docUrl = '';
-    try { docUrl = Office.context.document.url || ''; } catch (e) {}
-    var name = docUrl
-        ? decodeURIComponent(docUrl.split('/').pop().replace(/\.[^.]+$/, '')) + '.pdf'
-        : 'document.pdf';
-
-    var a = document.createElement('a');
-    a.href = pdfUrl;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(pdfUrl); }, 60000);
 }
 
 // Functie registreren bij Office
